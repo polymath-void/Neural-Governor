@@ -76,8 +76,21 @@ fn get_brain_recommendation(snapshot: &SystemSnapshot) -> String {
 }
 
 fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
     let snapshot = collect_snapshot()?;
-    let action = get_brain_recommendation(&snapshot);
+    
+    let action = if args.len() > 1 {
+        let custom_cmd = args[1..].join(" ");
+        println!("Brain analyzing custom prompt: {}", custom_cmd);
+        custom_cmd
+    } else {
+        println!("Brain autonomously determining action based on hardware state...");
+        get_brain_recommendation(&snapshot)
+    };
+    
+    println!("Action Selected: {}", action);
+    println!("Reasoning: Pre-flight checks pending...");
+    
     let result = execute_action(&snapshot, &action)?;
     println!("Action result: {}", result);
     Ok(())
