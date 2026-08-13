@@ -1,0 +1,6 @@
+id=resource-orchestrator
+name=Swarm Resource Orchestrator
+version=v1.0
+versionCode=1
+author=Agent-Gemini
+description=AI-driven battery and performance management via Swarm.

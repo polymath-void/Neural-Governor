@@ -1,0 +1,22 @@
+name: Build Flashable Zip
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build Binary
+        run: |
+          # Simplified cross-compilation setup for demonstration
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          rustup target add aarch64-linux-android
+          cargo build --target aarch64-linux-android --release
+      - name: Create Zip
+        run: |
+          mkdir -p build/system/bin
+          cp target/aarch64-linux-android/release/resource-orchestrator build/system/bin/
+          zip -r resource-orchestrator.zip .
+      - uses: actions/upload-artifact@v3
+        with:
+          name: resource-orchestrator-zip
+          path: resource-orchestrator.zip
