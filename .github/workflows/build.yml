@@ -5,24 +5,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Binary
+      - name: Create Magisk Module Zip
         run: |
-          # Simplified cross-compilation setup for demonstration
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          rustup target add aarch64-linux-android
-          cargo build --target aarch64-linux-android --release
-      - name: Create Zip
-        run: |
-          mkdir -p build/system/bin
-          cp target/aarch64-linux-android/release/resource-orchestrator build/system/bin/
-          zip -r resource-orchestrator.zip .
+          zip -r Neural-Governor.zip module.prop customize.sh system README.md
       - uses: actions/upload-artifact@v4
         with:
-          name: resource-orchestrator-zip
-          path: resource-orchestrator.zip
+          name: Neural-Governor-zip
+          path: Neural-Governor.zip
 
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: resource-orchestrator.zip
+          files: Neural-Governor.zip
