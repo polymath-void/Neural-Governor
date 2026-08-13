@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-import subprocess
+import json
 import time
-import sys
+import urllib.request
+import urllib.error
+import os
+import subprocess
 from rich.console import Console
 from rich.panel import Panel
 from rich.layout import Layout
@@ -11,28 +14,81 @@ from rich.prompt import Prompt
 from rich.align import Align
 
 console = Console()
-GOVERNOR_BIN = "/data/data/com.termux/files/home/Projects/Neural-Governor/system/bin/resource-orchestrator"
+CONFIG_FILE = "/data/adb/modules/resource-orchestrator/system/etc/resource_config.sh"
+SNAPSHOT_FILE = "/data/local/tmp/neural_snapshot.json"
+ACTION_FILE = "/data/local/tmp/neural_action.txt"
 
-def get_sys_info():
+def get_api_key():
     try:
-        with open("/proc/stat", "r") as f:
-            cpu = f.readline().strip()
-        with open("/proc/meminfo", "r") as f:
-            mem = [f.readline().strip() for _ in range(2)]
-        return f"CPU: {cpu[:30]}...\n{mem[0]}\n{mem[1]}"
-    except:
-        return "System metrics unavailable"
+        with open(CONFIG_FILE, "r") as f:
+            for line in f:
+                if line.startswith("export GEMINI_API_KEY="):
+                    return line.split("=")[1].strip().strip('"')
+    except Exception:
+        pass
+    return None
 
-def run_brain(prompt=None):
-    cmd = [GOVERNOR_BIN]
-    if prompt:
-        cmd.append(prompt)
+def check_api_key():
+    if not get_api_key() or get_api_key() == "YOUR_KEY_HERE":
+        console.clear()
+        console.print(Panel(Align.center(Text("API Key Configuration Required", style="bold yellow"))))
+        api_key = Prompt.ask("\n[bold cyan]Please paste your Google AI Studio Gemini API Key[/bold cyan]")
+        if api_key:
+            new_content = f'export GEMINI_API_KEY="{api_key}"\n'
+            subprocess.run(["su", "-c", f"echo '{new_content}' > {CONFIG_FILE}"])
+            console.print("\n[bold green]API Key saved successfully![/bold green]")
+            time.sleep(1)
+
+def read_snapshot():
     try:
-        # Run binary and capture output
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        return res.stdout if res.returncode == 0 else f"Error: {res.stderr}"
+        with open(SNAPSHOT_FILE, "r") as f:
+            data = json.load(f)
+            return data
+    except Exception:
+        return None
+
+def write_action(command):
+    try:
+        subprocess.run(["su", "-c", f"echo '{command}' > {ACTION_FILE}"])
     except Exception as e:
-        return f"Failed to execute brain: {e}"
+        pass
+
+def run_brain(snapshot, custom_prompt=None):
+    api_key = get_api_key()
+    if not api_key:
+        return "Error: API Key missing."
+        
+    model = "gemini-2.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    
+    prompt = "You are Neural-Governor. Analyze this system state and output exactly ONE short shell command to optimize resource usage (or 'echo stable' if fine):\n"
+    prompt += json.dumps(snapshot)
+    if custom_prompt:
+        prompt = f"User Request: {custom_prompt}\nContext: {json.dumps(snapshot)}\nOutput exactly ONE shell command to achieve the request."
+
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 500}
+    }
+    
+    req = urllib.request.Request(url, data=json.dumps(data).encode("utf-8"), headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res = json.loads(response.read().decode("utf-8"))
+            try:
+                action = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+            except KeyError:
+                return f"API Error: Reached token limit or missing parts. Raw: {res.get('candidates', [{}])[0].get('finishReason', 'Unknown')}"
+            
+            # Clean up markdown if any
+            if action.startswith("```"):
+                action = action.split("\n")[1]
+            elif action.startswith("`"):
+                action = action.strip("`")
+            write_action(action)
+            return action
+    except Exception as e:
+        return f"API Error: {e}"
 
 def generate_layout(brain_output, sys_info):
     layout = Layout()
@@ -42,7 +98,7 @@ def generate_layout(brain_output, sys_info):
         Layout(name="footer", size=3)
     )
     
-    header = Panel(Align.center(Text("🧠 POLYMATH-VOID NEURAL GOVERNOR 🧠", style="bold cyan")), style="cyan")
+    header = Panel(Align.center(Text("🧠 NEURAL GOVERNOR AI STUDIO 🧠", style="bold cyan")), style="cyan")
     layout["header"].update(header)
     
     layout["main"].split_row(
@@ -50,7 +106,7 @@ def generate_layout(brain_output, sys_info):
         Layout(name="brain_output", ratio=2)
     )
     
-    metrics_panel = Panel(Text(sys_info, style="green"), title="[ Hardware Context ]", border_style="green")
+    metrics_panel = Panel(Text(sys_info, style="green"), title="[ Hardware Context Snapshot ]", border_style="green")
     layout["sys_metrics"].update(metrics_panel)
     
     brain_panel = Panel(Text(brain_output, style="yellow"), title="[ Brain Processing & Action ]", border_style="yellow")
@@ -61,56 +117,37 @@ def generate_layout(brain_output, sys_info):
     
     return layout
 
-CONFIG_FILE = "/data/adb/modules/resource-orchestrator/system/etc/resource_config.sh"
-
-def check_api_key():
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            content = f.read()
-    except Exception:
-        content = ""
-    
-    if "YOUR_KEY_HERE" in content or "GEMINI_API_KEY" not in content:
-        console.clear()
-        console.print(Panel(Align.center(Text("API Key Configuration Required", style="bold yellow"))))
-        api_key = Prompt.ask("\n[bold cyan]Please paste your Gemini API Key[/bold cyan]")
-        if api_key:
-            new_content = f'export GEMINI_API_KEY="{api_key}"\n'
-            # Write to the secure Magisk location using su
-            subprocess.run(["su", "-c", f"echo '{new_content}' > {CONFIG_FILE}"])
-            console.print("\n[bold green]API Key saved successfully![/bold green]")
-            time.sleep(1)
-
 def main():
     check_api_key()
     console.clear()
     
-    # Initial autonomous run
-    initial_output = "Booting Neural-Governor...\nAnalyzing context..."
-    sys_info = get_sys_info()
+    initial_output = "Connecting to Gemini AI Studio..."
+    sys_info = "Waiting for daemon snapshot..."
     
     with Live(generate_layout(initial_output, sys_info), refresh_per_second=4, screen=True) as live:
         time.sleep(1)
-        initial_output = run_brain()
+        snap = read_snapshot()
+        if snap:
+            sys_info = f"CPU: {snap.get('cpu_stat', '')[:30]}...\n{snap.get('mem_info', '')}\nBattery: {snap.get('battery')}%\nThermal: {snap.get('thermal')}"
+            initial_output = f"Action Issued: {run_brain(snap)}"
+        else:
+            initial_output = "Error: Daemon snapshot not found. Is resource-orchestrator running?"
         live.update(generate_layout(initial_output, sys_info))
     
-    # Interactive loop
     while True:
         console.clear()
         console.print(generate_layout(initial_output, sys_info))
-        
         user_input = Prompt.ask("\n[bold cyan]Prompt[/bold cyan]")
         
         if user_input.lower() in ['exit', 'quit']:
-            console.print("[bold red]Shutting down Neural Governor Interface...[/bold red]")
             break
             
-        sys_info = get_sys_info()
-        console.clear()
+        snap = read_snapshot()
+        sys_info = f"CPU: {snap.get('cpu_stat', '')[:30]}...\n{snap.get('mem_info', '')}\nBattery: {snap.get('battery')}%\nThermal: {snap.get('thermal')}" if snap else "Error reading snapshot"
         
-        with Live(generate_layout("Brain is processing custom command...", sys_info), refresh_per_second=4, screen=True) as live:
-            time.sleep(0.5)
-            initial_output = run_brain(user_input)
+        console.clear()
+        with Live(generate_layout("Brain is consulting Gemini API...", sys_info), refresh_per_second=4, screen=True) as live:
+            initial_output = f"Action Issued: {run_brain(snap, user_input)}"
             live.update(generate_layout(initial_output, sys_info))
 
 if __name__ == "__main__":

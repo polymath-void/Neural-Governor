@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Result};
 use std::process::Command;
 use std::fs;
+use std::path::Path;
 use serde::{Deserialize, Serialize};
+use std::thread;
+use std::time::Duration;
 
-// 1. Comprehensive Device Snapshot
 #[derive(Debug, Serialize)]
 struct SystemSnapshot {
     cpu_stat: String,
@@ -11,87 +13,99 @@ struct SystemSnapshot {
     battery: String,
     thermal: String,
     soc_info: String,
+    active_tasks: String,
 }
 
 fn collect_snapshot() -> Result<SystemSnapshot> {
-    let cpu_stat = fs::read_to_string("/proc/stat")?.lines().next().unwrap_or("").to_string();
-    let mem_info = fs::read_to_string("/proc/meminfo")?.lines().next().unwrap_or("").to_string();
-    let battery = fs::read_to_string("/sys/class/power_supply/battery/capacity")?.trim().to_string();
+    let cpu_stat = fs::read_to_string("/proc/stat").unwrap_or_default().lines().next().unwrap_or("").to_string();
+    let mem_info = fs::read_to_string("/proc/meminfo").unwrap_or_default().lines().take(3).collect::<Vec<_>>().join(" | ");
+    let battery = fs::read_to_string("/sys/class/power_supply/battery/capacity").unwrap_or_else(|_| "100".to_string()).trim().to_string();
     
-    // Thermal: Get temp from first thermal zone
-    let thermal = fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").unwrap_or_else(|_| "0".to_string());
+    // Attempt thermal
+    let thermal = fs::read_to_string("/sys/class/thermal/thermal_zone0/temp").unwrap_or_else(|_| "0".to_string()).trim().to_string();
     
-    // SoC Info: Comprehensive identification
-    let soc_info = fs::read_to_string("/proc/cpuinfo")?.to_string();
+    let soc_info = fs::read_to_string("/proc/cpuinfo").unwrap_or_default().lines().find(|l| l.contains("Hardware")).unwrap_or("Unknown").to_string();
     
-    Ok(SystemSnapshot { cpu_stat, mem_info, battery, thermal, soc_info })
+    // Grab top tasks (very basic)
+    let active_tasks = match Command::new("top").args(["-n", "1", "-m", "5"]).output() {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).lines().take(6).collect::<Vec<_>>().join("\n"),
+        Err(_) => "Unknown".to_string()
+    };
+
+    Ok(SystemSnapshot { cpu_stat, mem_info, battery, thermal, soc_info, active_tasks })
 }
 
-// 2. Notifications
-fn notify_system(title: &str, message: &str) -> Result<()> {
-    let _ = Command::new("termux-notification")
-        .args(["--title", title, "--content", message])
-        .status()?;
+// Write the snapshot to a known shared location for the brain
+fn write_snapshot_for_brain(snapshot: &SystemSnapshot) -> Result<()> {
+    let json = serde_json::to_string(snapshot)?;
+    fs::write("/data/local/tmp/neural_snapshot.json", &json)?;
+    let _ = Command::new("chmod").args(["666", "/data/local/tmp/neural_snapshot.json"]).status();
     Ok(())
 }
 
-// 3. Automated Safety Validation (Pre-flight)
-fn pre_flight_verify(_snapshot: &SystemSnapshot, cmd: &str) -> Result<bool> {
-    println!("Brain pre-flight analysis for command: {}", cmd);
-    // Placeholder: This is where Gemini API will analyze hardware context vs command
-    let is_safe = !cmd.contains("rm -rf") && !cmd.contains("/dev/block/");
-    Ok(is_safe)
+fn check_path_writable(path: &str) -> bool {
+    let p = Path::new(path);
+    p.exists() && fs::OpenOptions::new().write(true).open(p).is_ok()
 }
 
-// 4. Execution Engine with Verification
-fn execute_action(snapshot: &SystemSnapshot, action: &str) -> Result<String> {
-    if !pre_flight_verify(snapshot, action)? {
-        let _ = notify_system("Orchestrator Security", &format!("Rejected unsafe command: {}", action));
-        return Err(anyhow!("Pre-flight verification failed!"));
+fn execute_action(action: &str) -> Result<String> {
+    // If it's a file write, check if possible, fallback if not
+    if action.contains(">") {
+        let parts: Vec<&str> = action.split('>').collect();
+        if parts.len() == 2 {
+            let file_path = parts[1].trim();
+            if !check_path_writable(file_path) {
+                // Fallback action, kernel path locked
+                let fallback = format!("log -t NeuralGovernor 'Locked path: {} - falling back to renice'", file_path);
+                Command::new("su").args(["-c", &fallback]).output()?;
+                return Err(anyhow!("Kernel path locked: {}", file_path));
+            }
+        }
     }
 
     let output = Command::new("su").args(["-c", action]).output()?;
-    
     if output.status.success() {
-        let res = String::from_utf8_lossy(&output.stdout).to_string();
-        let _ = notify_system("Orchestrator Success", &format!("Action: {} | Result: {}", action, res));
-        Ok(res)
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     } else {
-        let err = String::from_utf8_lossy(&output.stderr).to_string();
-        let _ = notify_system("Orchestrator Error", &format!("Action: {} | Error: {}", action, err));
-        Err(anyhow!("Execution failed: {}", err))
+        Err(anyhow!("Execution failed: {}", String::from_utf8_lossy(&output.stderr)))
     }
 }
 
-// 5. Brain Logic (Hardware-Aware)
-fn get_brain_recommendation(snapshot: &SystemSnapshot) -> String {
-    println!("Brain analyzing hardware: {}", snapshot.soc_info.lines().next().unwrap_or("Unknown"));
-    
-    // Safety Filter: Hardcoded for demonstration.
-    if snapshot.battery.parse::<i32>().unwrap_or(100) < 20 {
-        "echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor".to_string()
-    } else {
-        "sync; echo 3 > /proc/sys/vm/drop_caches".to_string()
+fn daemon_loop() {
+    println!("Starting Neural-Governor Sub-Booster Daemon...");
+    loop {
+        if let Ok(snapshot) = collect_snapshot() {
+            let _ = write_snapshot_for_brain(&snapshot);
+            
+            // Here it would read /data/local/tmp/neural_action.txt populated by the Python Orchestrator
+            if let Ok(action) = fs::read_to_string("/data/local/tmp/neural_action.txt") {
+                if !action.trim().is_empty() {
+                    let _ = execute_action(action.trim());
+                    // Clear action after execution
+                    let _ = fs::write("/data/local/tmp/neural_action.txt", "");
+                    let _ = Command::new("chmod").args(["666", "/data/local/tmp/neural_action.txt"]).status();
+                }
+            } else {
+                // Create an empty file with wide permissions if it doesn't exist
+                let _ = fs::write("/data/local/tmp/neural_action.txt", "");
+                let _ = Command::new("chmod").args(["666", "/data/local/tmp/neural_action.txt"]).status();
+            }
+        }
+        // Sleep heavily to prevent battery drain
+        thread::sleep(Duration::from_secs(10));
     }
 }
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let snapshot = collect_snapshot()?;
-    
-    let action = if args.len() > 1 {
-        let custom_cmd = args[1..].join(" ");
-        println!("Brain analyzing custom prompt: {}", custom_cmd);
-        custom_cmd
+    if args.contains(&"--daemon".to_string()) {
+        daemon_loop();
     } else {
-        println!("Brain autonomously determining action based on hardware state...");
-        get_brain_recommendation(&snapshot)
-    };
-    
-    println!("Action Selected: {}", action);
-    println!("Reasoning: Pre-flight checks pending...");
-    
-    let result = execute_action(&snapshot, &action)?;
-    println!("Action result: {}", result);
+        println!("Neural-Governor 2.0 - Use --daemon for background monitoring.");
+        // One shot snapshot
+        let snap = collect_snapshot()?;
+        let json = serde_json::to_string_pretty(&snap)?;
+        println!("Current Snapshot:\n{}", json);
+    }
     Ok(())
 }

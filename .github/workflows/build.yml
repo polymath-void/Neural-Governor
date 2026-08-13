@@ -16,7 +16,7 @@ jobs:
           cp target/aarch64-linux-android/release/resource-orchestrator system/bin/
       - name: Create Magisk Module Zip
         run: |
-          zip -r Neural-Governor.zip module.prop customize.sh system README.md
+          zip -r Neural-Governor.zip module.prop customize.sh service.sh system README.md
       - uses: actions/upload-artifact@v4
         with:
           name: Neural-Governor-zip
