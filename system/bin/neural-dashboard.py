@@ -172,6 +172,10 @@ def main():
         user_input = Prompt.ask("\n[bold cyan]Prompt[/bold cyan]")
         
         if user_input.lower() in ['exit', 'quit']:
+            console.clear()
+            console.print("[bold green]Exiting Neural Governor Dashboard...[/bold green]")
+            import os
+            os.system('stty sane')
             break
             
         if user_input.lower().startswith("/mode"):
