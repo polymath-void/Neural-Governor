@@ -16,6 +16,7 @@ console = Console()
 CONFIG_FILE = "/data/adb/modules/resource-orchestrator/system/etc/resource_config.sh"
 SNAPSHOT_FILE = "/data/local/tmp/neural_snapshot.json"
 ACTION_FILE = "/data/local/tmp/neural_action.txt"
+LOG_FILE = "/data/local/tmp/neural_execution_history.jsonl"
 
 # State variables
 command_history = []
@@ -60,6 +61,24 @@ def write_action(command):
     except Exception as e:
         pass
 
+def append_log(snap_before, user_prompt, response, command, snap_after):
+    log_entry = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "snapshot_before": snap_before,
+        "user_prompt": user_prompt,
+        "brain_response": response,
+        "executed_command": command,
+        "snapshot_after": snap_after
+    }
+    try:
+        # Save to local termux directory instead of root temp if possible, but sticking to /data/local/tmp for cross-process
+        with open(LOG_FILE, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+        # Ensure it is readable
+        subprocess.run(["su", "-c", f"chmod 666 {LOG_FILE}"], stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
 def run_brain(snapshot, custom_prompt=None, mode="Auto"):
     api_key = get_api_key()
     if not api_key:
@@ -100,9 +119,14 @@ User Prompt (if any): {custom_prompt if custom_prompt else "Autonomous monitorin
                 
             if action.startswith("CHAT:"):
                 chat_msg = action.replace("CHAT:", "").strip()
+                append_log(snapshot, custom_prompt, chat_msg, None, None)
                 return f"[AI Discussion]\n{chat_msg}"
             else:
                 write_action(action)
+                # Pause to let the daemon execute and the system stabilize
+                time.sleep(2)
+                snap_after = read_snapshot()
+                append_log(snapshot, custom_prompt, action, action, snap_after)
                 return f"[Action Executed]\n{action}"
     except Exception as e:
         return f"API Error: {e}"
