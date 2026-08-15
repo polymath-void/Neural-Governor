@@ -59,10 +59,8 @@ def main():
     model = "gemini-2.5-flash" # Temporary safe fallback, adjust if 3.1-flash-lite is definitely live
     # We will try gemini-2.5-flash for now since 3.1-flash-lite might throw 404 on some API keys.
     # Wait, the user specifically asked for gemini-3.1-flash-lite. Let's use it.
-    model = "gemini-3.1-flash-lite"
+def ask_brain(api_key, model, trigger_reason, snap, error_context=None, prev_cmd=None):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    
-    snap = read_snapshot()
     
     prompt = f"""You are Neural-Governor Brain.
 Trigger: {trigger_reason}
@@ -75,21 +73,20 @@ RULES:
 EXPLANATION: <briefly explain the issue and solution>
 COMMAND: <exact bash command to run, or NONE>
 """
+    if error_context:
+        prompt += f"\n\n[URGENT FALLBACK REQUIRED]\nYour previous command `{prev_cmd}` failed to execute.\nError Output:\n{error_context}\nPlease analyze why it failed and provide a DIFFERENT, safer alternative COMMAND."
+
     data = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 600}
     }
     
     req = urllib.request.Request(url, data=json.dumps(data).encode("utf-8"), headers={"Content-Type": "application/json"})
-    
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
             res = json.loads(response.read().decode("utf-8"))
-            try:
-                action_text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
-            except KeyError:
-                sys.exit(1)
-                
+            action_text = res["candidates"][0]["content"]["parts"][0]["text"].strip()
+            
             explanation = ""
             command = ""
             for line in action_text.split('\n'):
@@ -97,40 +94,58 @@ COMMAND: <exact bash command to run, or NONE>
                     explanation = line.replace("EXPLANATION:", "").strip()
                 elif line.startswith("COMMAND:"):
                     command = line.replace("COMMAND:", "").strip()
-                    
             if not command and not explanation:
-                # Fallback if AI didn't follow format
                 explanation = action_text
-                
-            exec_log = ""
-            if command and command != "NONE":
-                # Execute the command
-                try:
-                    proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
-                    exec_log = proc.stdout + "\n" + proc.stderr
-                except Exception as e:
-                    exec_log = f"Failed to execute: {str(e)}"
-                    
-                # We can also write to action file if dashboard wants to see it live
-                try:
-                    with open(ACTION_FILE, "w") as f:
-                        f.write(command)
-                    subprocess.run(["chmod", "666", ACTION_FILE], stderr=subprocess.DEVNULL)
-                except Exception:
-                    pass
-            
-            # Log to JSONL if it's NOT a manual request
-            if not is_manual:
-                append_log(snap, trigger_reason, explanation, command, exec_log.strip())
-            else:
-                # If manual, we print it out so the dashboard can read the output
-                print(f"EXPLANATION: {explanation}")
-                print(f"COMMAND: {command}")
-                print(f"OUTPUT: {exec_log.strip()}")
+            return explanation, command
+    except Exception as e:
+        return f"API Error: {str(e)}", ""
 
-    except urllib.error.HTTPError as e:
-        # If 3.1-flash-lite fails (e.g. 404), fallback to 2.5-flash
-        print(f"API Error: {e.code}")
+def main():
+    if len(sys.argv) < 2:
+        sys.exit(1)
+        
+    trigger_reason = sys.argv[1]
+    is_manual = trigger_reason.startswith("MANUAL:")
+    
+    api_key = get_api_key()
+    if not api_key:
+        sys.exit(1)
+
+    model = "gemini-3.1-flash-lite"
+    snap = read_snapshot()
+    
+    explanation, command = ask_brain(api_key, model, trigger_reason, snap)
+    
+    exec_log = ""
+    if command and command != "NONE":
+        try:
+            proc = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+            exec_log = proc.stdout + "\n" + proc.stderr
+            
+            # FALLBACK MECHANISM: If the command failed, ask the AI for a different method
+            if proc.returncode != 0 and not is_manual:
+                exec_log = f"Failed (Exit {proc.returncode}): {proc.stderr.strip()}"
+                
+                exp2, cmd2 = ask_brain(api_key, model, trigger_reason, snap, exec_log, command)
+                explanation += f"\n[FALLBACK TRIGGERED] Original failed. New Reasoning: {exp2}"
+                command = cmd2
+                
+                if cmd2 and cmd2 != "NONE":
+                    proc2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True, timeout=10)
+                    exec_log += f"\n[Fallback Output] {proc2.stdout} \n {proc2.stderr}"
+
+            with open(ACTION_FILE, "w") as f:
+                f.write(command)
+            subprocess.run(["chmod", "666", ACTION_FILE], stderr=subprocess.DEVNULL)
+        except Exception as e:
+            exec_log = f"Exception: {str(e)}"
+            
+    if not is_manual:
+        append_log(snap, trigger_reason, explanation, command, exec_log.strip())
+    else:
+        print(f"EXPLANATION: {explanation}")
+        print(f"COMMAND: {command}")
+        print(f"OUTPUT: {exec_log.strip()}")
 
 if __name__ == "__main__":
     main()
