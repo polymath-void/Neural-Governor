@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use std::thread;
-use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
 #[derive(Debug, Serialize)]
 struct SystemSnapshot {
@@ -71,24 +71,53 @@ fn execute_action(action: &str) -> Result<String> {
     }
 }
 
+fn analyze_snapshot(snap: &SystemSnapshot) -> Option<String> {
+    if let Ok(temp) = snap.thermal.parse::<i32>() {
+        if temp > 45000 {
+            return Some(format!("High thermal anomaly detected: {} millidegrees.", temp));
+        }
+    }
+    if let Ok(bat) = snap.battery.parse::<i32>() {
+        if bat <= 25 {
+            return Some(format!("Battery critical anomaly: {}%. Apply extreme power saving.", bat));
+        }
+    }
+    
+    // Very basic CPU spike detection from active tasks string (heuristic)
+    if snap.active_tasks.contains(" 9") && snap.active_tasks.contains(".") || snap.active_tasks.contains("100.") {
+        return Some("High CPU usage spike detected in top tasks.".to_string());
+    }
+    
+    None
+}
+
 fn daemon_loop() {
     println!("Starting Neural-Governor Sub-Booster Daemon...");
+    let mut last_trigger_time = 0;
     loop {
         if let Ok(snapshot) = collect_snapshot() {
             let _ = write_snapshot_for_brain(&snapshot);
             
-            // Here it would read /data/local/tmp/neural_action.txt populated by the Python Orchestrator
+            // Analyze and potentially wake the brain
+            if let Some(anomaly) = analyze_snapshot(&snapshot) {
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                // Cooldown: only trigger at most once every 5 minutes (300 seconds)
+                if now - last_trigger_time > 300 {
+                    let safe_anomaly = anomaly.replace("'", "");
+                    // We execute the brain_wake.py script using the magisk overlay path
+                    let cmd = format!("python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", safe_anomaly);
+                    let _ = Command::new("su").args(["-c", &cmd]).status();
+                    last_trigger_time = now;
+                }
+            }
+            
+            // Process any manual actions queued by the dashboard
             if let Ok(action) = fs::read_to_string("/data/local/tmp/neural_action.txt") {
                 if !action.trim().is_empty() {
                     let _ = execute_action(action.trim());
-                    // Clear action after execution
                     let _ = fs::write("/data/local/tmp/neural_action.txt", "");
                     let _ = Command::new("chmod").args(["666", "/data/local/tmp/neural_action.txt"]).status();
                 }
-            } else {
-                // Create an empty file with wide permissions if it doesn't exist
-                let _ = fs::write("/data/local/tmp/neural_action.txt", "");
-                let _ = Command::new("chmod").args(["666", "/data/local/tmp/neural_action.txt"]).status();
             }
         }
         // Sleep heavily to prevent battery drain
