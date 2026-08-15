@@ -1,36 +1,36 @@
-# 🧠 Neural-Governor
+# Neural-Governor V3
 
-AI-driven, swarm-aware resource orchestrator for Android (Termux/Root/Magisk).
+**Neural-Governor** is an autonomous, root-level AI system orchestrator for Android (via Magisk). It monitors device telemetry at the kernel level and leverages advanced AI (Gemini Flash APIs) to dynamically optimize performance, battery life, and thermals in real-time.
 
-## Overview
-Neural-Governor is a high-performance, compiled Rust binary that provides autonomous, intelligent management of CPU, Memory, and Battery health for your device. It integrates with the **Polymath-Void** architecture to inject AI logic directly into the Android system layer.
+## Architecture
 
-## ✨ Features
-- **Hardware-Awareness**: Dynamically identifies device SoC to apply safe, device-specific configurations.
-- **Autonomous Safety**: Mandatory **Pre-flight Verification Loop** where the Brain analyzes every command for safety *before* execution.
-- **Interactive TUI Dashboard**: Shipped with `neural-dashboard` — a stunning Python/Rich Terminal UI that provides real-time visibility into brain processing, system metrics, and allows you to send **custom prompts** directly to the AI orchestrator.
-- **Token-Efficient**: Uses lightweight, one-shot management scripts rather than heavy, continuous API streams.
-- **Instant Notifications**: Utilizes system-level notifications for transparent, real-time action auditing.
-- **Automated CI/CD Pipeline**: GitHub Actions automatically compile the Rust binary, build the Magisk module, bundle dependencies, and publish a flashable zip on every push.
+Neural-Governor V3 introduces a decoupled "Watcher-Brain" architecture:
 
-## 🚀 Installation
-1. **Download**: Grab the latest flashable `.zip` artifact from the **Releases** page.
-2. **Flash via Magisk**: Install the zip through the Magisk app or a custom recovery. 
-   *(Note: The flashing process will automatically install Termux dependencies like Python and Rich for the TUI).*
-3. **API Configuration**: Ensure your Gemini API Key is configured. *(Check the internal script or define it via `/sdcard/gemini_api.txt` if using the Magisk App UI).*
-4. **Boot**: Upon boot, `Neural-Governor` is ready to autonomously manage your device resources.
+1. **The Rust Watcher (`resource-orchestrator`)**
+   - Runs 24/7 as a lightweight Magisk daemon.
+   - Constantly gathers telemetry (Thermals, CPU spikes, Battery level).
+   - **Reactive Mode**: Instantly detects anomalies (e.g., Thermals > 45°C) and wakes the Brain for emergency mitigation.
+   - **Proactive Mode (Auto-Pilot)**: Wakes the Brain every 15 minutes to proactively tune the system based on the user's selected mode (Performance, Battery Saver, etc.).
 
-## 💻 Using the Dashboard (TUI)
-Once the Magisk module is installed, you can monitor the AI's internal reasoning and take manual control from anywhere in Termux. 
+2. **The Python Brain (`brain_wake.py`)**
+   - A standalone execution engine that wakes up only when triggered.
+   - Queries `gemini-3.1-flash-lite` (or fallback) with the system anomaly and context.
+   - Safely executes bash commands as root to optimize the system (ZRAM tuning, renicing, CPU governor tweaks).
+   - Logs everything into a `jsonl` file for offline model training and transparency.
+   - Sleeps immediately after execution to conserve 100% of background CPU.
 
-Open Termux and run:
-```bash
-neural-dashboard
-```
-This will open the fully interactive Terminal UI where you can monitor the hardware context or pass custom reasoning commands straight to the brain.
+3. **The Interactive Dashboard (`neural-dashboard.py`)**
+   - A pure, Termux-based UI (using `rich`) that reads the `jsonl` log files.
+   - Displays real-time hardware status and a rolling log of recent AI autonomous actions.
+   - Allows users to change modes via `/mode` (Auto Pilot, Performance, Battery Saver, Balanced).
+   - Allows manual prompt injection for custom AI commands.
 
-## 🛠 Development & Architecture
-- **Rust Engine**: Written in Rust (`src/main.rs`) and compiled via `cargo-ndk` targeting `aarch64-linux-android`.
-- **Dashboard Interface**: Python `rich` wrapper (`polymath_cli.py`) stored in `system/bin/neural-dashboard`.
-- **Workflow**: Automated build workflow via `.github/workflows/build.yml` creates a release zip automatically.
-- **Security**: Hardened via Rust memory safety and explicit pre-flight command validation.
+## Installation
+1. Flash the `Neural-Governor.zip` module in Magisk.
+2. Reboot the device.
+3. Open Termux and run `neural-dashboard`.
+4. (First run only) Paste your Google AI Studio API Key.
+
+## Logs & Transparency
+All background autonomous actions are logged in `JSON Lines` format to `/data/local/tmp/neural_execution_history.jsonl`.
+Use `/logs` inside the dashboard to view them in a human-readable format.
