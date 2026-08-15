@@ -133,7 +133,7 @@ fn daemon_loop() {
             }
         }
         // Sleep heavily to prevent battery drain
-        thread::sleep(Duration::from_secs(10));
+        thread::sleep(Duration::from_secs(15));
     }
 }
 
