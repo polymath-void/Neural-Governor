@@ -7,7 +7,7 @@ Neural-Governor V3 operates using a localized Swarm Architecture to ensure the d
 **Location:** `/data/adb/modules/resource-orchestrator/system/bin/resource-orchestrator`
 **Behavior:**
 - Runs continuously (24/7) with virtually 0% CPU footprint.
-- **Reactive Analysis:** Checks `/proc/stat`, `/sys/class/thermal`, and `top` every 10 seconds.
+- **Reactive Analysis:** Checks `/proc/stat`, `/sys/class/thermal`, and `top` every 15 seconds.
 - **Trigger Conditions:** 
   - Thermal exceeds 45°C.
   - Battery drops below 25%.
@@ -21,6 +21,7 @@ Neural-Governor V3 operates using a localized Swarm Architecture to ensure the d
 - Only wakes when called by the Watcher Agent or manually by the User.
 - Uses `gemini-3.1-flash-lite` (or fallback) to reason over the anomaly.
 - Writes and executes root bash scripts natively to solve the issue (e.g., tweaking ZRAM, altering CPU governors, renicing processes).
+- **Auto-Fallback Mechanism:** If a generated bash command fails (exit code != 0), it intercepts the `stderr` and queries the LLM again for a safer alternative command.
 - **Logging Pipeline:** Safely documents the entire interaction (Context -> AI Reasoning -> Shell Command -> Output) into `/data/local/tmp/neural_execution_history.jsonl` for offline dataset generation.
 
 ## The Dashboard Agent (User Interface)
