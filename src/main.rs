@@ -94,19 +94,31 @@ fn analyze_snapshot(snap: &SystemSnapshot) -> Option<String> {
 fn daemon_loop() {
     println!("Starting Neural-Governor Sub-Booster Daemon...");
     let mut last_trigger_time = 0;
+    let mut last_periodic_time = 0;
     loop {
         if let Ok(snapshot) = collect_snapshot() {
             let _ = write_snapshot_for_brain(&snapshot);
             
-            // Analyze and potentially wake the brain
+            // Analyze and potentially wake the brain for emergencies
             if let Some(anomaly) = analyze_snapshot(&snapshot) {
                 let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
                 // Cooldown: only trigger at most once every 5 minutes (300 seconds)
                 if now - last_trigger_time > 300 {
                     let safe_anomaly = anomaly.replace("'", "");
-                    // We execute the brain_wake.py script using the magisk overlay path
                     let cmd = format!("python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", safe_anomaly);
                     let _ = Command::new("su").args(["-c", &cmd]).status();
+                    last_trigger_time = now;
+                    last_periodic_time = now; // reset periodic timer
+                }
+            } else {
+                // No emergency anomaly. Execute proactive Auto Pilot / Mode optimization check every 15 minutes.
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                if now - last_periodic_time > 900 {
+                    let current_mode = fs::read_to_string("/data/local/tmp/neural_mode.txt").unwrap_or_else(|_| "Auto Pilot".to_string());
+                    let proactive_prompt = format!("PROACTIVE TUNING: System is stable. Current Mode is {}. Apply safe governor, paging, and kernel tweaks to optimize for this mode without causing instability.", current_mode.trim());
+                    let cmd = format!("python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", proactive_prompt);
+                    let _ = Command::new("su").args(["-c", &cmd]).status();
+                    last_periodic_time = now;
                     last_trigger_time = now;
                 }
             }

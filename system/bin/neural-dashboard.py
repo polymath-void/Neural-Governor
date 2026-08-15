@@ -14,6 +14,7 @@ console = Console()
 CONFIG_FILE = "/data/adb/modules/resource-orchestrator/system/etc/resource_config.sh"
 LOG_FILE = "/data/local/tmp/neural_execution_history.jsonl"
 BRAIN_SCRIPT = "/data/adb/modules/resource-orchestrator/system/bin/brain_wake.py"
+MODE_FILE = "/data/local/tmp/neural_mode.txt"
 
 def check_api_key():
     import os
@@ -118,6 +119,23 @@ def main():
             
         if user_input.lower().startswith("/logs"):
             view_full_logs()
+            continue
+            
+        if user_input.lower().startswith("/mode"):
+            try:
+                print("Modes: 1. Auto Pilot 2. Performance 3. Battery Saver 4. Balanced")
+                m = Prompt.ask("Select mode (1-4)")
+                modes = ["Auto Pilot", "Performance", "Battery Saver", "Balanced"]
+                idx = int(m) - 1
+                if 0 <= idx < len(modes):
+                    current_mode = modes[idx]
+                    subprocess.run(["su", "-c", f"echo '{current_mode}' > {MODE_FILE}"])
+                    subprocess.run(["su", "-c", f"chmod 666 {MODE_FILE}"])
+                    manual_output = f"[bold green]Watcher Mode switched to: {current_mode}[/bold green]"
+                else:
+                    manual_output = "[bold red]Invalid mode selected.[/bold red]"
+            except ValueError:
+                manual_output = "[bold red]Invalid input.[/bold red]"
             continue
             
         if user_input.strip():
