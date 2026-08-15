@@ -105,7 +105,7 @@ fn daemon_loop() {
                 // Cooldown: only trigger at most once every 5 minutes (300 seconds)
                 if now - last_trigger_time > 300 {
                     let safe_anomaly = anomaly.replace("'", "");
-                    let cmd = format!("python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", safe_anomaly);
+                    let cmd = format!("/data/data/com.termux/files/usr/bin/python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", safe_anomaly);
                     let _ = Command::new("su").args(["-c", &cmd]).status();
                     last_trigger_time = now;
                     last_periodic_time = now; // reset periodic timer
@@ -116,7 +116,7 @@ fn daemon_loop() {
                 if now - last_periodic_time > 900 {
                     let current_mode = fs::read_to_string("/data/local/tmp/neural_mode.txt").unwrap_or_else(|_| "Auto Pilot".to_string());
                     let proactive_prompt = format!("PROACTIVE TUNING: System is stable. Current Mode is {}. Apply safe governor, paging, and kernel tweaks to optimize for this mode without causing instability.", current_mode.trim());
-                    let cmd = format!("python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", proactive_prompt);
+                    let cmd = format!("/data/data/com.termux/files/usr/bin/python3 /data/adb/modules/resource-orchestrator/system/bin/brain_wake.py '{}'", proactive_prompt);
                     let _ = Command::new("su").args(["-c", &cmd]).status();
                     last_periodic_time = now;
                     last_trigger_time = now;

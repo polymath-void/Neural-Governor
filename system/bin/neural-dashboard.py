@@ -145,7 +145,7 @@ def main():
                 # We call the standalone brain_wake script directly for manual tasks
                 # Make sure to run it as root so it has permissions
                 safe_prompt = user_input.replace("'", "")
-                cmd = f"su -c \"python3 {BRAIN_SCRIPT} 'MANUAL: {safe_prompt}'\""
+                cmd = f"su -c \"/data/data/com.termux/files/usr/bin/python3 {BRAIN_SCRIPT} 'MANUAL: {safe_prompt}'\""
                 proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                 manual_output = f"[bold]Manual Request:[/bold] {user_input}\n\n"
                 
