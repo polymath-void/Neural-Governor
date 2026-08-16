@@ -1,36 +1,62 @@
-# Neural-Governor V3
+# Neural-Governor V3 🧠⚡
 
-**Neural-Governor** is an autonomous, root-level AI system orchestrator for Android (via Magisk). It monitors device telemetry at the kernel level and leverages advanced AI (Gemini Flash APIs) to dynamically optimize performance, battery life, and thermals in real-time.
+**Neural-Governor** is an autonomous, root-level AI system orchestrator for Android (via Magisk). It operates deep inside your device's kernel, leveraging advanced AI (Gemini Flash) to dynamically optimize performance, battery life, and thermals in real-time. 
 
-## Architecture
+Instead of relying on static scripts, Neural-Governor actually *thinks* about your device's current state and writes custom mitigation commands on the fly.
 
-Neural-Governor V3 introduces a decoupled "Watcher-Brain" architecture:
+---
 
-1. **The Rust Watcher (`resource-orchestrator`)**
-   - Runs 24/7 as a lightweight Magisk daemon.
-   - Constantly gathers telemetry (Thermals, CPU spikes, Battery level).
-   - **Reactive Mode**: Instantly detects anomalies (e.g., Thermals > 45°C) and wakes the Brain for emergency mitigation.
-   - **Proactive Mode (Auto-Pilot)**: Wakes the Brain every 15 minutes to proactively tune the system based on the user's selected mode (Performance, Battery Saver, etc.).
+## 🏗️ How It Works (The Swarm Architecture)
 
-2. **The Python Brain (`brain_wake.py`)**
-   - A standalone execution engine that wakes up only when triggered.
-   - Queries `gemini-3.1-flash-lite` (or fallback) with the system anomaly and context.
-   - Safely executes bash commands as root to optimize the system (ZRAM tuning, renicing, CPU governor tweaks).
-   - Logs everything into a `jsonl` file for offline model training and transparency.
-   - Sleeps immediately after execution to conserve 100% of background CPU.
+Neural-Governor is powered by a decoupled, highly efficient dual-agent architecture:
 
-3. **The Interactive Dashboard (`neural-dashboard.py`)**
-   - A pure, Termux-based UI (using `rich`) that reads the `jsonl` log files.
-   - Displays real-time hardware status and a rolling log of recent AI autonomous actions.
-   - Allows users to change modes via `/mode` (Auto Pilot, Performance, Battery Saver, Balanced).
-   - Allows manual prompt injection for custom AI commands.
+### 1. The Watcher (Rust Daemon)
+A native `aarch64` Rust binary running in the background 24/7. It has virtually 0% CPU footprint and checks your system telemetry (Thermals, CPU usage, Battery) every 15 seconds. 
+* **Reactive Mitigation:** If your phone spikes above 45°C or battery drops critically, it instantly wakes the AI.
+* **Proactive Tuning:** If the device is healthy, it wakes the AI every 15 minutes to apply background performance/battery optimizations.
 
-## Installation
-1. Flash the `Neural-Governor.zip` module in Magisk.
-2. Reboot the device.
-3. Open Termux and run `neural-dashboard`.
-4. (First run only) Paste your Google AI Studio API Key.
+### 2. The Brain (Python + AI)
+The AI engine only wakes up when triggered. It receives the system telemetry snapshot, reasons about the issue, and executes a custom root shell command (e.g., tweaking ZRAM, altering CPU governors, renicing heavy tasks). If a command fails, it automatically falls back and tries a safer alternative.
 
-## Logs & Transparency
-All background autonomous actions are logged in `JSON Lines` format to `/data/local/tmp/neural_execution_history.jsonl`.
-Use `/logs` inside the dashboard to view them in a human-readable format.
+---
+
+## 🚀 Installation Guide
+
+### Prerequisites & Dependencies
+To run Neural-Governor, you need a rooted Android device with **Magisk** and **Termux** installed.
+
+1. **Install Termux Dependencies:**
+   Open Termux and install Python and the required UI library:
+   ```bash
+   pkg update && pkg upgrade -y
+   pkg install python -y
+   pip install rich
+   ```
+
+2. **Download & Flash the Module:**
+   - Go to the [Releases](https://github.com/polymath-void/Neural-Governor/releases) page.
+   - Download the latest `Neural-Governor-v3.x.zip`.
+   - Open Magisk Manager -> **Modules** -> **Install from storage**.
+   - Select the ZIP file and flash it.
+   - **Reboot your device.**
+
+### First-Time Setup
+After rebooting, the Rust Watcher is already running silently in the background! 
+To set up your AI and view the dashboard:
+
+1. Open Termux.
+2. Run the dashboard using root privileges:
+   ```bash
+   su -c neural-dashboard
+   ```
+3. *Note: If this is your first time, the dashboard will prompt you to paste your free Google AI Studio (Gemini) API Key.*
+
+---
+
+## 💻 Using the Dashboard
+
+The Dashboard is a pure UI that reads the AI's background execution logs so you can see exactly what the Brain is doing.
+
+* **View Logs:** Type `/logs` in the dashboard to read a complete history of anomalies detected, the AI's reasoning, and the exact bash commands it executed.
+* **Change Modes:** Type `/mode` to switch the Watcher's tuning strategy between: `Auto Pilot`, `Performance`, `Battery Saver`, or `Balanced`.
+* **Manual Injection:** Type any normal prompt (e.g., *"My game is lagging, fix it"*) to manually wake the Brain and have it optimize your device on the spot.
